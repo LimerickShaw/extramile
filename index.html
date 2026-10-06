@@ -1,0 +1,768 @@
+<!DOCTYPE html>
+<!--
+  GO THE EXTRA MILE: online board game for 2 to 6 teams
+  =================================================================
+  Cost: $0. Uses Firebase Realtime Database (free "Spark" plan, no credit card)
+  for the live shared board, and GitHub Pages (free) to host this one file.
+
+  ONE-TIME SETUP (about 20 to 30 minutes)
+  1. Go to https://console.firebase.google.com, sign in with a Google account,
+     click "Create a project", name it, and turn Google Analytics off.
+  2. In the left menu: Build > Realtime Database > Create database.
+     Pick a location, choose "Start in locked mode", then open the Rules tab,
+     replace everything with the rules below, and click Publish:
+
+       {
+         "rules": {
+           "games": {
+             "$code": { ".read": true, ".write": true }
+           }
+         }
+       }
+
+  3. Project settings (gear icon) > General > "Your apps" > click the </> (Web) icon,
+     register the app (no hosting needed), and copy the firebaseConfig values
+     into FIREBASE_CONFIG below. Make sure databaseURL is filled in; if it's
+     missing, copy the URL shown at the top of the Realtime Database page.
+  4. Create a free GitHub account, make a new PUBLIC repository, and upload this
+     file named index.html. Then Settings > Pages > Source: "Deploy from a branch",
+     Branch: main, folder: / (root), Save. After a minute or two your game lives at
+     https://YOUR-USERNAME.github.io/YOUR-REPO/
+  5. Open that address, click "Create a game", and share the link it gives you.
+
+  Until step 3 is done the page runs in a single-device preview mode so you can try it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Go the Extra Mile</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏁</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800;900&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<style>
+:root{
+  --asphalt:#2E333A; --asphalt-2:#3A4049; --asphalt-3:#454C57; --road:#1B1E22;
+  --sign:#0E6B47; --sign-dark:#0A5537; --paper:#F6F6F1; --lane:#F2C230;
+  --muted:#AEB6BF; --danger:#F06A6E;
+  --font:"Overpass","Highway Gothic","Segoe UI",system-ui,-apple-system,sans-serif;
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--asphalt);color:var(--paper);font-family:var(--font);font-size:16px;line-height:1.45;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{cursor:not-allowed;opacity:.45}
+:focus-visible{outline:3px solid var(--lane);outline-offset:2px}
+.wrap{max-width:1180px;margin:0 auto;padding:16px clamp(12px,3vw,28px) 48px}
+
+/* Header sign */
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+.sign{background:var(--sign);border-radius:10px;padding:5px;display:inline-block;box-shadow:0 3px 0 var(--sign-dark)}
+.sign-inner{border:2.5px solid var(--paper);border-radius:7px;padding:6px 14px 4px}
+.brand{font-weight:900;font-size:clamp(20px,4vw,28px);letter-spacing:-.01em;margin:0;line-height:1.1}
+.brand a{color:inherit;text-decoration:none}
+
+/* Landing */
+.hero{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);gap:clamp(20px,5vw,56px);align-items:center;padding:clamp(16px,5vw,48px) 0}
+.distance .sign-inner{padding:18px 22px 14px}
+.distance h2{font-size:clamp(34px,7vw,64px);font-weight:900;line-height:.95;margin:0 0 14px;letter-spacing:-.02em}
+.dist-row{display:flex;justify-content:space-between;gap:24px;font-weight:800;font-size:clamp(18px,3vw,24px);border-top:2px solid rgba(246,246,241,.35);padding:6px 0 2px}
+.hero p{color:var(--muted);max-width:46ch;margin:0 0 20px;font-size:18px}
+.hero h3{font-size:24px;margin:0 0 8px;font-weight:800}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.btn{border:0;border-radius:8px;padding:12px 18px 10px;font-weight:800;background:var(--asphalt-3);color:var(--paper)}
+.btn:hover:not(:disabled){background:#525a66}
+.btn.primary{background:var(--lane);color:#22262b}
+.btn.primary:hover:not(:disabled){background:#ffd24d}
+.btn.big{font-size:20px;padding:16px 22px 13px;width:100%}
+.btn.small{padding:7px 11px 5px;font-size:14px}
+.btn.ghost{background:transparent;border:2px solid var(--asphalt-3)}
+.btn.danger{color:var(--danger)}
+.input{background:var(--road);border:2px solid var(--asphalt-3);border-radius:8px;padding:11px 12px 9px;min-width:0;width:100%}
+.input:focus{border-color:var(--lane);outline:none}
+.code-input{text-transform:uppercase;max-width:160px;letter-spacing:.08em}
+
+/* Game layout */
+.game{display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:22px;align-items:start}
+.panel{background:var(--asphalt-2);border-radius:12px;padding:16px;margin-bottom:16px}
+.panel h3{margin:0 0 10px;font-size:19px;font-weight:800}
+.muted{color:var(--muted)}
+.share{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:16px}
+.share .input{flex:1 1 220px;font-size:14px}
+.status{display:inline-block;border-radius:999px;padding:4px 12px 2px;font-weight:800;font-size:14px;background:var(--asphalt-3)}
+.status.racing{background:var(--lane);color:#22262b}
+.status.finished{background:var(--paper);color:#22262b}
+.preview-note{background:#4a3f1a;border-left:4px solid var(--lane);border-radius:8px;padding:10px 14px;margin-bottom:16px;font-size:15px}
+
+/* Board */
+.board-wrap{position:relative;background:#59704a;background:linear-gradient(#5d7a4c,#4e6941);border-radius:16px;padding:clamp(10px,2.5vw,24px)}
+.road{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
+.road-edge{fill:none;stroke:#d9d9cf;stroke-width:46;stroke-linejoin:round;stroke-linecap:round}
+.road-base{fill:none;stroke:var(--road);stroke-width:40;stroke-linejoin:round;stroke-linecap:round}
+.road-line{fill:none;stroke:var(--lane);stroke-width:3;stroke-dasharray:10 10;stroke-linejoin:round}
+.board{position:relative;z-index:1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:clamp(12px,3vw,26px)}
+.slot{min-height:clamp(92px,13vw,124px)}
+.tile{background:var(--sign);border-radius:9px;padding:4px;box-shadow:0 3px 0 var(--sign-dark);display:flex;flex-direction:column}
+.tile-in{border:2px solid var(--paper);border-radius:6px;flex:1;display:flex;flex-direction:column;padding:4px 4px 3px}
+.tile-sign{text-align:center;line-height:1}
+.mile-word{display:block;font-size:clamp(10px,1.6vw,13px);font-weight:600}
+.mile-num{display:block;font-size:clamp(20px,3.6vw,32px);font-weight:900}
+.tile-note{display:block;font-size:clamp(9px,1.4vw,11px);font-weight:600;color:#cfe7d9;margin-top:1px}
+.tile.start{background:#1f5aa6;box-shadow:0 3px 0 #163f75}
+.tile.start .mile-num,.tile.finish .mile-num{font-size:clamp(14px,2.6vw,22px);padding:6px 0 2px}
+.tile.finish{background:repeating-conic-gradient(#111 0 25%,#f6f6f1 0 50%) 0 0/14px 14px;box-shadow:0 3px 0 #000}
+.tile.finish .tile-in{background:var(--sign);border-color:var(--paper)}
+.tokens{display:flex;flex-wrap:wrap;gap:2px;justify-content:center;align-content:flex-end;flex:1;padding-top:3px}
+.token{width:calc(50% - 2px);max-width:54px;display:block;filter:drop-shadow(0 1px 0 rgba(0,0,0,.4))}
+.token.me{filter:drop-shadow(0 0 3px var(--lane))}
+.token.moved{animation:pop .5s ease-out}
+@keyframes pop{0%{transform:translateY(-6px) scale(1.15)}100%{transform:none}}
+
+/* Car picker */
+.cars{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 14px}
+.car-opt{background:var(--road);border:2px solid var(--asphalt-3);border-radius:10px;padding:8px 6px 6px;text-align:center;font-weight:600;font-size:14px}
+.car-opt svg{width:100%;max-width:120px;height:auto;display:block;margin:0 auto 2px}
+.car-opt[aria-pressed="true"]{border-color:var(--lane);background:#2a2e1f}
+.car-opt small{display:block;color:var(--muted);font-weight:400;font-size:12px}
+.label{display:block;font-weight:600;margin-bottom:6px}
+
+/* My car */
+.mycar{display:flex;gap:12px;align-items:center;margin-bottom:12px}
+.mycar svg{width:110px;flex:none}
+.mycar strong{display:block;font-size:20px;line-height:1.15}
+
+/* Standings */
+.standings{list-style:none;margin:0;padding:0}
+.standings li{display:grid;grid-template-columns:22px 52px minmax(0,1fr) auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--asphalt-3)}
+.standings li:first-child{border-top:0}
+.place{font-weight:900;color:var(--muted)}
+.pname{font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tag{font-size:11px;font-weight:800;background:var(--asphalt-3);border-radius:4px;padding:2px 5px 0;margin-left:4px;vertical-align:2px}
+.tag.you{background:var(--lane);color:#22262b}
+.bar{height:6px;border-radius:3px;background:var(--road);margin-top:4px;overflow:hidden}
+.bar span{display:block;height:100%;background:var(--lane);transition:width .4s}
+.ctrls{display:flex;gap:4px}
+.ctrls .btn{padding:6px 10px 4px;min-width:34px}
+.teamlist,.roster{list-style:none;margin:0;padding:0}
+.teamlist li{display:grid;grid-template-columns:56px minmax(0,1fr) auto;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--asphalt-3)}
+.teamlist li:first-child{border-top:0}
+.roster li{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:5px 0;border-top:1px solid var(--asphalt-3);font-size:15px}
+.roster li:first-child{border-top:0}
+.note{background:var(--road);border-left:4px solid var(--lane);border-radius:6px;padding:10px 12px;margin:0 0 4px;font-size:15px}
+.log{list-style:none;margin:0;padding:0;font-size:14px;max-height:220px;overflow:auto}
+.log li{padding:4px 0;border-top:1px solid var(--asphalt-3)}
+.log time{color:var(--muted);font-size:12px;margin-right:6px}
+
+/* Celebration */
+.celebrate{position:fixed;inset:0;z-index:50;display:none;align-items:center;justify-content:center;background:rgba(20,22,26,.82);padding:20px}
+.celebrate.show{display:flex}
+#confetti{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.cele-card{position:relative;text-align:center;max-width:560px;width:100%}
+.cele-card .sign-inner{padding:22px 20px 18px}
+.cele-card svg.car{width:min(260px,70%);display:block;margin:0 auto 6px}
+.cele-name{font-size:20px;font-weight:600;margin:0 0 4px}
+.cele-msg{font-size:clamp(28px,6vw,46px);font-weight:900;line-height:1.05;margin:0 0 18px;letter-spacing:-.01em}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--paper);color:#22262b;font-weight:600;border-radius:8px;padding:10px 16px 8px;z-index:60;max-width:90vw;display:none}
+.toast.show{display:block}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+@media (max-width:900px){
+  .game{grid-template-columns:1fr}
+  .board-wrap{margin-bottom:16px}
+  .hero{grid-template-columns:1fr}
+}
+@media (max-width:480px){
+  .board{gap:9px}
+  .slot{min-height:84px}
+  .token{width:100%;max-width:none}
+  .road-edge{stroke-width:30}.road-base{stroke-width:25}
+  .standings li{grid-template-columns:18px 44px minmax(0,1fr) auto}
+}
+@media (prefers-reduced-motion:reduce){
+  .token.moved{animation:none}.bar span{transition:none}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="topbar">
+    <div class="sign"><div class="sign-inner"><h1 class="brand"><a href="./">Go the Extra Mile</a></h1></div></div>
+    <span id="statusPill" class="status" hidden></span>
+  </header>
+  <div id="previewNote" class="preview-note" hidden>
+    Preview mode: this copy isn't connected to Firebase yet, so it only works on this device and resets when you reload.
+    Add teams below and move any car with the + and − buttons. Follow the setup steps at the top of the file to play online.
+  </div>
+  <main id="app"></main>
+</div>
+
+<div class="celebrate" id="celebrate" role="dialog" aria-modal="true" aria-labelledby="celeMsg">
+  <canvas id="confetti"></canvas>
+  <div class="cele-card">
+    <div class="sign" style="display:block"><div class="sign-inner">
+      <div id="celeCar"></div>
+      <p class="cele-name" id="celeName"></p>
+      <p class="cele-msg" id="celeMsg">Congratulations, you went the extra mile!!</p>
+      <div class="row" style="justify-content:center" id="celeBtns"></div>
+    </div></div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/* =========  PASTE YOUR FIREBASE CONFIG HERE (setup step 3)  ========= */
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyA3dTG3Kzh_KhrzqcD9drYfisR4I-2bh4U",
+  authDomain: "extra-mile-game.firebaseapp.com",
+  databaseURL: "https://extra-mile-game-default-rtdb.firebaseio.com",
+  projectId: "extra-mile-game",
+  appId: "1:847497307110:web:ed57217299a3df8ba9ac27"
+};
+/* ==================================================================== */
+
+const FINISH = 18, MAX_TEAMS = 6;
+const CARS = [
+  {id:"supercar", name:"Apex supercar",   color:"#E0303F", accent:"#7D121C"},
+  {id:"gt",       name:"Grand tourer",    color:"#2F6BE0", accent:"#16306E"},
+  {id:"hyper",    name:"Hypercar",        color:"#F28C28", accent:"#2A2A2A"},
+  {id:"roadster", name:"Classic roadster",color:"#F2E3C2", accent:"#6B4A2B"},
+  {id:"sedan",    name:"Executive sedan", color:"#B8C0CA", accent:"#4A525C"},
+  {id:"ev",       name:"Electric GT",     color:"#19C2B0", accent:"#0B5C55"}
+];
+const CAR = Object.fromEntries(CARS.map(c => [c.id, c]));
+
+/* ---------- Car artwork (original designs, all facing right) ---------- */
+const BOTTOM = "L104,40 A12,12 0 0 0 80,40 L42,40 A12,12 0 0 0 18,40 Z";
+const GLASS = "#1D2A35";
+const SHAPES = {
+  supercar: c => `<path d="M6,40 L6,32 L14,28 L42,24 L58,15 L76,14 L98,23 L114,28 L116,34 L114,40 ${BOTTOM}" fill="${c.color}"/>
+    <path d="M47,24 L60,17 L74,16.5 L88,24 Z" fill="${GLASS}"/><path d="M50,33 L68,30 L66,35 Z" fill="${c.accent}"/>
+    <path d="M104,26 L113,29 L111,31 L103,28 Z" fill="#FFF3B0"/><rect x="6" y="30" width="4" height="3" fill="#FF5A5A"/>`,
+  gt: c => `<path d="M6,40 L6,30 L16,26 L36,24 L50,14 L68,13.5 L80,21 L108,24 L116,30 L116,40 ${BOTTOM}" fill="${c.color}"/>
+    <path d="M53,22 L59,16 L67,16 L74,22 Z" fill="${GLASS}"/><path d="M10,31 L112,31" stroke="${c.accent}" stroke-width="1.5"/>
+    <rect x="110" y="25" width="5" height="3" rx="1" fill="#FFF3B0"/><rect x="6" y="28" width="4" height="3" fill="#FF5A5A"/>`,
+  hyper: c => `<path d="M6,40 L8,30 L30,26 L50,16 L70,15 L92,24 L116,30 L116,40 ${BOTTOM}" fill="${c.color}"/>
+    <path d="M54,24 L60,18 L70,17.5 L82,24 Z" fill="${GLASS}"/>
+    <rect x="4" y="15" width="24" height="3.5" rx="1" fill="${c.accent}"/><rect x="13" y="18" width="3" height="10" fill="${c.accent}"/>
+    <path d="M28,33 L112,33" stroke="${c.accent}" stroke-width="2.5"/><path d="M106,27 L115,30 L113,32 Z" fill="#FFF3B0"/>`,
+  roadster: c => `<path d="M8,40 L8,34 Q8,27 22,27 L94,26 Q116,27 116,35 L116,40 ${BOTTOM}" fill="${c.color}"/>
+    <path d="M44,27 Q44,19 51,19 L51,27 Z" fill="${c.accent}"/>
+    <path d="M60,26 L66,17" stroke="#CFE7F2" stroke-width="3" stroke-linecap="round"/>
+    <path d="M12,32 L112,32" stroke="${c.accent}" stroke-width="1.5"/><circle cx="111" cy="29" r="2.5" fill="#FFF3B0"/>`,
+  sedan: c => `<path d="M6,40 L6,30 L12,27 L28,25 L40,14 L80,14 L94,24 L112,26 L116,32 L116,40 ${BOTTOM}" fill="${c.color}"/>
+    <path d="M42,24 L49,16.5 L60,16.5 L60,24 Z" fill="${GLASS}"/><path d="M63,24 L63,16.5 L78,16.5 L88,24 Z" fill="${GLASS}"/>
+    <path d="M10,31 L114,31" stroke="${c.accent}" stroke-width="1.5"/><rect x="110" y="27" width="5" height="3" fill="#FFF3B0"/>
+    <rect x="6" y="28" width="4" height="3" fill="#FF5A5A"/>`,
+  ev: c => `<path d="M6,40 Q4,28 26,25 Q50,10 76,14 Q100,18 112,27 Q118,31 116,40 ${BOTTOM}" fill="${c.color}"/>
+    <path d="M44,24 Q56,14 74,16 L88,24 Z" fill="${GLASS}"/>
+    <path d="M100,25 L113,29" stroke="#A8F8FF" stroke-width="2.5" stroke-linecap="round"/><path d="M8,30 L16,29" stroke="#FF5A5A" stroke-width="2.5" stroke-linecap="round"/>`
+};
+const WHEELS = [30, 92].map(x =>
+  `<circle cx="${x}" cy="38" r="8.5" fill="#15181C"/><circle cx="${x}" cy="38" r="4" fill="#C9CED6"/>`).join("");
+function carSVG(id, opts = {}) {
+  const c = CAR[id]; if (!c) return "";
+  const g = opts.flip ? '<g transform="translate(120,0) scale(-1,1)">' : "<g>";
+  return `<svg viewBox="0 0 120 50" class="car ${opts.cls || ""}" role="img" aria-label="${esc(opts.label || c.name)}">
+    <title>${esc(opts.label || c.name)}</title>${g}<ellipse cx="61" cy="47" rx="54" ry="2.5" fill="rgba(0,0,0,.3)"/>
+    ${SHAPES[id](c)}${WHEELS}</g></svg>`;
+}
+
+/* ---------- Helpers ---------- */
+const $ = s => document.querySelector(s);
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, m => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
+function rid(n) { const a = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; let s = ""; const r = crypto.getRandomValues(new Uint32Array(n)); for (const v of r) s += a[v % a.length]; return s; }
+function toArr(v) { return Array.isArray(v) ? v.filter(Boolean) : v ? Object.values(v) : []; }
+function posLabel(p) { return p <= 0 ? "Start" : p >= FINISH ? "the finish" : "Mile " + p; }
+let toastTimer;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show"); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 3200); }
+function patch(el, html) { if (el && el._html !== html) { el.innerHTML = html; el._html = html; return true; } return false; }
+
+/* ---------- Data layer: Firebase, or in-memory preview ---------- */
+const PREVIEW = String(FIREBASE_CONFIG.apiKey).includes("PASTE") || !window.firebase;
+let backend;
+if (!PREVIEW) {
+  firebase.initializeApp(FIREBASE_CONFIG);
+  const db = firebase.database();
+  backend = {
+    watch(code, cb) {
+      const ref = db.ref("games/" + code);
+      const h = s => cb(s.val());
+      ref.on("value", h, err => { console.error(err); toast("Can't reach the game database. Check the Firebase rules and databaseURL."); });
+      return () => ref.off("value", h);
+    },
+    create(code, data) { return db.ref("games/" + code).transaction(g => g ? undefined : data).then(r => r.committed); },
+    txn(code, fn) { return db.ref("games/" + code).transaction(fn).then(r => r.committed); }
+  };
+} else {
+  const mem = {}, subs = {};
+  const clone = v => v == null ? null : JSON.parse(JSON.stringify(v));
+  const emit = code => (subs[code] || []).forEach(cb => cb(clone(mem[code])));
+  backend = {
+    watch(code, cb) { (subs[code] = subs[code] || []).push(cb); setTimeout(() => cb(clone(mem[code]))); return () => { subs[code] = subs[code].filter(x => x !== cb); }; },
+    create(code, data) { if (mem[code]) return Promise.resolve(false); mem[code] = clone(data); emit(code); return Promise.resolve(true); },
+    txn(code, fn) { const r = fn(clone(mem[code])); if (r === undefined) return Promise.resolve(false); mem[code] = clone(r); emit(code); return Promise.resolve(true); }
+  };
+}
+function getPid() {
+  try { let id = localStorage.getItem("gtem_pid"); if (!id) { id = rid(14); localStorage.setItem("gtem_pid", id); } return id; }
+  catch (e) { return window.__pid || (window.__pid = rid(14)); }
+}
+const myId = getPid();
+
+/* ---------- State ---------- */
+let code = null, game = null, unwatch = null, loaded = false;
+let celebratedAt = null, draftName = "", draftTeam = "", draftCar = null;
+const lastPos = {};
+const isHost = g => PREVIEW || (g && g.hostId === myId);
+const byJoined = (a, b) => (a.joinedAt || 0) - (b.joinedAt || 0);
+const teamsOf = g => Object.entries((g && g.teams) || {}).map(([id, t]) => ({id, ...t, members: t.members || {}}));
+const membersOf = t => Object.entries(t.members || {}).map(([id, m]) => ({id, ...m})).sort(byJoined);
+const canMove = (g, t) => isHost(g) || t.captainId === myId;
+// Which team (if any) this device belongs to, and in what role. Works on raw game data.
+function teamOf(g, pid = myId) {
+  for (const [id, t] of Object.entries((g && g.teams) || {})) {
+    if (t.captainId === pid) return {id, t, role: "captain"};
+    if (t.members && t.members[pid]) return {id, t, role: "member"};
+  }
+  return null;
+}
+const clean = (s, n = 20) => String(s || "").trim().replace(/\s+/g, " ").slice(0, n);
+
+async function act(mutate) {
+  let reason = null;
+  const ok = await backend.txn(code, g => {
+    if (!g) { reason = "This game couldn't be loaded. Refresh the page."; return; }
+    g.teams = g.teams || {}; g.log = toArr(g.log);
+    const r = mutate(g);
+    if (typeof r === "string") { reason = r; return; }
+    reason = null; return g;
+  }).catch(e => { console.error(e); reason = "Connection problem. Check your internet and try again."; return false; });
+  if (!ok && reason) toast(reason);
+  return ok;
+}
+function addLog(g, text) { g.log = [...g.log, {t: Date.now(), text}].slice(-12); }
+
+const actions = {
+  createTeam(teamName, captainName, car) {
+    return act(g => {
+      if (g.status !== "lobby") return "New teams can only be added before the race starts. Join an existing team instead.";
+      if (!PREVIEW && teamOf(g)) return "You're already on a team. Leave it first to start a new one.";
+      if (Object.keys(g.teams).length >= MAX_TEAMS) return "This game is full (6 teams).";
+      if (Object.values(g.teams).some(t => t.car === car)) return "That car was just taken. Pick another one.";
+      if (Object.values(g.teams).some(t => t.name.toLowerCase() === teamName.toLowerCase())) return "There's already a team with that name.";
+      g.teams[rid(8)] = {name: teamName, car, pos: 0, joinedAt: Date.now(), captainId: PREVIEW ? rid(14) : myId, captainName};
+      addLog(g, `${teamName} entered the ${CAR[car].name.toLowerCase()} with ${captainName} as captain`);
+    });
+  },
+  joinTeam(teamId, name) {
+    return act(g => {
+      const t = g.teams[teamId]; if (!t) return "That team is no longer in the game.";
+      if (teamOf(g)) return "You're already on a team. Leave it first to switch.";
+      t.members = t.members || {};
+      t.members[myId] = {name, joinedAt: Date.now()};
+      addLog(g, `${name} joined ${t.name}`);
+    });
+  },
+  leave() {
+    return act(g => {
+      const mine = teamOf(g); if (!mine) return "You're not on a team.";
+      const {id, t, role} = mine;
+      if (role === "member") { const n = t.members[myId].name; delete t.members[myId]; addLog(g, `${n} left ${t.name}`); return; }
+      const next = Object.entries(t.members || {}).sort((a, b) => byJoined(a[1], b[1]))[0];
+      if (next) {
+        const [mid, m] = next, old = t.captainName;
+        delete t.members[mid]; t.captainId = mid; t.captainName = m.name;
+        addLog(g, `${old} left ${t.name}. ${m.name} is now captain`);
+      } else { delete g.teams[id]; addLog(g, `${t.name} left the game`); }
+    });
+  },
+  makeCaptain(teamId, memberId) {
+    return act(g => {
+      const t = g.teams[teamId]; if (!t) return "That team is no longer in the game.";
+      if (!(isHost(g) || t.captainId === myId)) return "Only the captain or the host can hand over the captaincy.";
+      const m = t.members && t.members[memberId]; if (!m) return "That teammate has left.";
+      delete t.members[memberId];
+      t.members[t.captainId] = {name: t.captainName, joinedAt: Date.now()};
+      t.captainId = memberId; t.captainName = m.name;
+      addLog(g, `${m.name} is now captain of ${t.name}`);
+    });
+  },
+  changeCar(teamId, car) {
+    return act(g => {
+      const t = g.teams[teamId];
+      if (!t || g.status !== "lobby") return "Cars can only be changed before the race starts.";
+      if (!(isHost(g) || t.captainId === myId)) return "Only your captain can change the car.";
+      if (Object.entries(g.teams).some(([id, q]) => id !== teamId && q.car === car)) return "That car is taken.";
+      t.car = car;
+    });
+  },
+  removeTeam(teamId) {
+    return act(g => {
+      const t = g.teams[teamId]; if (!t) return "That team already left.";
+      if (!isHost(g)) return "Only the host can remove teams.";
+      delete g.teams[teamId]; addLog(g, `${t.name} was removed by the host`);
+    });
+  },
+  start() {
+    return act(g => {
+      if (!isHost(g)) return "Only the host can start the race.";
+      if (Object.keys(g.teams).length < 2) return "You need at least 2 teams to start.";
+      g.status = "racing"; g.startedAt = Date.now(); addLog(g, "The race started");
+    });
+  },
+  move(teamId, d) {
+    return act(g => {
+      if (g.status === "finished") return "The race is over.";
+      if (g.status !== "racing") return "The host hasn't started the race yet.";
+      const t = g.teams[teamId]; if (!t) return "That team isn't in the game.";
+      if (!(isHost(g) || t.captainId === myId)) return "Only your team captain can move your car.";
+      const np = Math.max(0, Math.min(FINISH, (t.pos || 0) + d));
+      if (np === (t.pos || 0)) return d > 0 ? "Already at the finish." : "Already at Start.";
+      t.pos = np;
+      addLog(g, `${t.name} ${d > 0 ? "moved up to" : "moved back to"} ${posLabel(np)}`);
+      if (np === FINISH) { g.winner = teamId; g.status = "finished"; g.finishedAt = Date.now(); addLog(g, `${t.name} won the race!`); }
+    });
+  },
+  reset() {
+    return act(g => {
+      if (!isHost(g)) return "Only the host can reset the race.";
+      Object.values(g.teams).forEach(t => t.pos = 0);
+      g.status = "lobby"; g.winner = null; g.finishedAt = null; addLog(g, "The host reset the race");
+    });
+  }
+};
+/* ---------- Landing ---------- */
+function showLanding(msg) {
+  if (unwatch) { unwatch(); unwatch = null; }
+  code = null; game = null; $("#statusPill").hidden = true;
+  $("#app").innerHTML = `
+  <section class="hero">
+    <div class="sign distance"><div class="sign-inner">
+      <h2>Go the extra mile</h2>
+      <div class="dist-row"><span>Start</span><span>0</span></div>
+      <div class="dist-row"><span>Halfway</span><span>9</span></div>
+      <div class="dist-row"><span>Finish</span><span>18</span></div>
+    </div></div>
+    <div>
+      ${msg ? `<p style="color:var(--lane);font-weight:600">${esc(msg)}</p>` : ""}
+      <h3>Race to mile 18</h3>
+      <p>Two to six teams. Everyone opens the same link on their own device and watches the board live, but only each team&#39;s captain can move its car. Earn your miles however your group decides. First to the finish wins.</p>
+      <div class="row" style="margin-bottom:22px"><button class="btn primary" data-action="create">Create a game</button></div>
+      ${PREVIEW ? "" : `<label class="label" for="joinCode">Have a game code?</label>
+      <div class="row"><input id="joinCode" class="input code-input" maxlength="5" autocomplete="off" placeholder="ABC12">
+      <button class="btn" data-action="gotoCode">Open game</button></div>`}
+    </div>
+  </section>`;
+}
+async function createGame() {
+  const c = PREVIEW ? "PREVIEW" : rid(5);
+  const ok = await backend.create(c, {createdAt: Date.now(), hostId: myId, status: "lobby", log: [{t: Date.now(), text: "Game created"}]})
+    .catch(e => { console.error(e); return false; });
+  if (!ok && !PREVIEW) { toast("Couldn't create the game. Check your Firebase setup and try again."); return; }
+  if (!PREVIEW) history.pushState({}, "", "?game=" + c);
+  openGame(c);
+}
+
+/* ---------- Game view ---------- */
+function slotOrder() {
+  const cols = 5, rows = Math.ceil((FINISH + 1) / cols), out = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+    const p = r * cols + (r % 2 ? cols - 1 - c : c);
+    out.push({p: p <= FINISH ? p : null, flip: r % 2 === 1});
+  }
+  return out;
+}
+const FLIP = {};
+function boardHTML() {
+  return slotOrder().map(({p, flip}) => {
+    if (p === null) return `<div class="slot" aria-hidden="true"></div>`;
+    FLIP[p] = flip;
+    const cls = p === 0 ? "start" : p === FINISH ? "finish" : "";
+    const sign = p === 0 ? `<span class="mile-num">Start</span>` : p === FINISH ? `<span class="mile-num">Finish</span>`
+      : `<span class="mile-word">Mile</span><span class="mile-num">${p}</span>${p === 9 ? `<span class="tile-note">Halfway</span>` : ""}`;
+    return `<div class="slot"><div class="tile ${cls}" data-pos="${p}" style="height:100%"><div class="tile-in">
+      <div class="tile-sign">${sign}</div><div class="tokens" id="tok-${p}"></div></div></div></div>`;
+  }).join("");
+}
+function drawRoad() {
+  const wrap = $("#boardWrap"), svg = $("#road"); if (!wrap || !svg) return;
+  const wr = wrap.getBoundingClientRect(), pts = [];
+  for (let p = 0; p <= FINISH; p++) {
+    const r = wrap.querySelector(`[data-pos="${p}"]`).getBoundingClientRect();
+    pts.push(`${(r.left - wr.left + r.width / 2).toFixed(1)},${(r.top - wr.top + r.height / 2).toFixed(1)}`);
+  }
+  const d = "M" + pts.join(" L");
+  svg.setAttribute("viewBox", `0 0 ${wr.width} ${wr.height}`);
+  svg.innerHTML = `<path d="${d}" class="road-edge"/><path d="${d}" class="road-base"/><path d="${d}" class="road-line"/>`;
+}
+
+function openGame(c) {
+  if (unwatch) unwatch();
+  code = c; game = null; loaded = false; celebratedAt = null;
+  $("#app").innerHTML = `
+  ${PREVIEW ? "" : `<div class="share">
+    <label class="sr" for="shareLink">Game link</label>
+    <input id="shareLink" class="input" readonly value="${esc(location.origin + location.pathname + "?game=" + c)}">
+    <button class="btn" data-action="copy">Copy link</button>
+    <span class="muted" style="font-size:14px">Game code ${esc(c)}</span></div>`}
+  <div class="game">
+    <section aria-label="Race board">
+      <div class="board-wrap" id="boardWrap"><svg class="road" id="road" aria-hidden="true"></svg>
+        <div class="board">${boardHTML()}</div></div>
+    </section>
+    <aside>
+      <div class="panel" id="mePanel"><p class="muted">Loading the game…</p></div>
+      <div class="panel" id="hostPanel" hidden></div>
+      <div class="panel"><h3>Standings</h3><ol class="standings" id="standings"></ol></div>
+      <div class="panel"><h3>Race log</h3><ul class="log" id="log"></ul></div>
+    </aside>
+  </div>`;
+  requestAnimationFrame(drawRoad);
+  unwatch = backend.watch(c, g => { game = g; loaded = true; render(); });
+}
+
+function carPicker(teams, selected, mode, teamId) {
+  const takenBy = {}; teams.forEach(t => takenBy[t.car] = t);
+  return `<div class="cars" role="group" aria-label="Choose your car">${CARS.map(c => {
+    const t = takenBy[c.id], own = mode === "change" && selected === c.id;
+    const dis = t && !own;
+    return `<button type="button" class="car-opt" data-action="${mode === "change" ? "changeCar" : "pickCar"}" data-car="${c.id}"
+      ${teamId ? `data-team="${teamId}"` : ""} aria-pressed="${selected === c.id}" ${dis ? "disabled" : ""}>${carSVG(c.id)}${esc(c.name)}
+      ${dis ? `<small>Taken by ${esc(t.name)}</small>` : ""}</button>`;
+  }).join("")}</div>`;
+}
+
+function newTeamFields(teams) {
+  if (draftCar && teams.some(t => t.car === draftCar)) draftCar = null;
+  return `<label class="label" for="tname">Team name</label>
+    <input id="tname" class="input" maxlength="20" autocomplete="off" placeholder="e.g. Team Turbo">
+    <span class="label" style="margin-top:14px">Pick your team's car</span>
+    ${carPicker(teams, draftCar, "join")}
+    <button class="btn primary" data-action="createTeam" style="width:100%">${PREVIEW ? "Add team" : "Start team as captain"}</button>`;
+}
+
+function rosterHTML(t, manage) {
+  const ms = membersOf(t);
+  return `<ul class="roster">
+    <li><span>${esc(t.captainName)}${t.captainId === myId && !PREVIEW ? " (you)" : ""}</span><span class="tag">Captain</span></li>
+    ${ms.map(m => `<li><span>${esc(m.name)}${m.id === myId ? " (you)" : ""}</span>
+      ${manage ? `<button class="btn small ghost" data-action="makeCaptain" data-team="${t.id}" data-id="${m.id}">Make captain</button>` : ""}</li>`).join("")}
+  </ul>${ms.length ? "" : `<p class="muted" style="font-size:14px;margin:4px 0 0">No teammates yet. They join from the game link.</p>`}`;
+}
+
+function render() {
+  if (!game) {
+    if (unwatch) { unwatch(); unwatch = null; }
+    showLanding(loaded ? "That game couldn't be found. Check the link, or create a new game." : ""); return;
+  }
+  const g = game, teams = teamsOf(g).sort(byJoined);
+  const mineRaw = PREVIEW ? null : teamOf(g);
+  const mine = mineRaw ? {team: teams.find(t => t.id === mineRaw.id), role: mineRaw.role} : null;
+  const host = isHost(g), full = teams.length >= MAX_TEAMS;
+
+  const pill = $("#statusPill"); pill.hidden = false;
+  pill.className = "status " + g.status;
+  pill.textContent = g.status === "lobby" ? "Waiting to start" : g.status === "racing" ? "Race on" : "Race finished";
+
+  // Cars on the board
+  for (let p = 0; p <= FINISH; p++) {
+    const here = teams.filter(x => (x.pos || 0) === p);
+    const changed = patch($("#tok-" + p), here.map(x => {
+      const moved = lastPos[x.id] !== undefined && lastPos[x.id] !== (x.pos || 0);
+      return `<span class="token ${mine && mine.team.id === x.id ? "me" : ""} ${moved ? "moved" : ""}">${carSVG(x.car, {flip: FLIP[p], label: x.name})}</span>`;
+    }).join(""));
+    if (changed) setTimeout(() => $("#tok-" + p)?.querySelectorAll(".moved").forEach(e => e.classList.remove("moved")), 600);
+  }
+  teams.forEach(x => lastPos[x.id] = x.pos || 0);
+
+  // My panel
+  let html;
+  if (PREVIEW) {
+    html = g.status === "lobby"
+      ? (full ? `<h3>All 6 cars are taken</h3><p class="muted">Start the race from the host panel.</p>`
+        : `<h3>Add a team</h3><label class="label" for="myname">Captain's name</label>
+           <input id="myname" class="input" maxlength="20" autocomplete="off" placeholder="e.g. Jordan" style="margin-bottom:12px">${newTeamFields(teams)}`)
+      : `<h3>Preview controls</h3><p class="muted">Use + and − next to each car in the standings. Online, only each team's captain can move its car.</p>`;
+  } else if (!mine) {
+    html = `<h3>Get on a team</h3>
+      <label class="label" for="myname">Your name</label>
+      <input id="myname" class="input" maxlength="20" autocomplete="off" placeholder="e.g. Jordan">`;
+    if (teams.length) html += `<span class="label" style="margin-top:16px">Join an existing team</span>
+      <ul class="teamlist">${teams.map(t => `<li>${carSVG(t.car)}<div style="min-width:0"><div class="pname">${esc(t.name)}</div>
+        <div class="muted" style="font-size:13px">Captain ${esc(t.captainName)}</div></div>
+        <button class="btn small" data-action="joinTeam" data-id="${t.id}">Join</button></li>`).join("")}</ul>`;
+    if (g.status === "lobby" && !full) html += `<span class="label" style="margin-top:18px;font-weight:800">${teams.length ? "Or start a new team" : "Start a team"}</span>
+      <p class="muted" style="margin:0 0 10px;font-size:14px">Whoever starts a team is its captain, the only one who can move its car.</p>${newTeamFields(teams)}`;
+    else if (g.status === "lobby") html += `<p class="muted" style="font-size:14px">All 6 team spots are taken. Join one of the teams above.</p>`;
+    else html += `<p class="muted" style="font-size:14px">The race has started, so new teams can't enter. You can still join a team above or just watch.</p>`;
+    if (host) html += `<p class="muted" style="margin:12px 0 0;font-size:14px">As host you can referee without a team, or join one too.</p>`;
+  } else {
+    const t = mine.team, cap = mine.role === "captain";
+    html = `<div class="mycar">${carSVG(t.car)}<div><strong>${esc(t.name)}</strong>
+      <span class="muted">${cap ? "You're the captain" : "Captain " + esc(t.captainName)}</span><br>
+      <span class="muted">${(t.pos || 0) === 0 ? "At Start" : (t.pos >= FINISH ? "At the finish" : `Mile ${t.pos} of ${FINISH}`)}</span></div></div>`;
+    if (cap) {
+      if (g.status === "lobby") html += `<p class="muted" style="margin:0 0 4px">Waiting for the host to start the race. You can still switch cars.</p>
+        ${carPicker(teams, t.car, "change", t.id)}`;
+      else if (g.status === "racing") html += `<button class="btn primary big" data-action="move" data-id="${t.id}" data-d="1">Move forward 1 mile</button>
+        <div class="row" style="margin:8px 0 4px"><button class="btn small ghost" data-action="move" data-id="${t.id}" data-d="-1">Move back 1 (fix a mistake)</button></div>`;
+    } else if (g.status !== "finished") {
+      html += `<p class="note">Only your captain, ${esc(t.captainName)}, can move your car. Every move shows up here live.</p>`;
+    }
+    if (g.status === "finished") html += `<p style="margin:0 0 4px;font-weight:600">${g.winner === t.id ? "Your team won this race!" : "The race is over. Better luck next round."}</p>`;
+    html += `<span class="label" style="margin-top:14px">Team roster</span>${rosterHTML(t, cap)}
+      <button class="btn small ghost" data-action="leave" style="margin-top:12px">Leave team</button>`;
+  }
+  const mp = $("#mePanel");
+  if (patch(mp, html)) {
+    const n = mp.querySelector("#myname"), tn = mp.querySelector("#tname");
+    if (n) { n.value = draftName; n.addEventListener("input", e => draftName = e.target.value); }
+    if (tn) { tn.value = draftTeam; tn.addEventListener("input", e => draftTeam = e.target.value); }
+  }
+
+  // Host panel
+  const hp = $("#hostPanel"); hp.hidden = !host;
+  if (host) {
+    let h = `<h3>Host controls</h3>`;
+    if (g.status === "lobby") h += `<p class="muted" style="margin-top:0">${PREVIEW ? "" : "Share the link above. Everyone joins from their own device. "}${teams.length} of ${MAX_TEAMS} teams on the grid.</p>
+      <button class="btn primary" data-action="start" ${teams.length < 2 ? "disabled" : ""}>Start the race</button>
+      ${teams.length < 2 ? `<p class="muted" style="font-size:14px;margin:8px 0 0">You need at least 2 teams to start.</p>` : ""}`;
+    else h += `<p class="muted" style="margin-top:0">You can move or remove any car to referee. Resetting sends every car back to Start and reopens team sign-up.</p>
+      <button class="btn" data-action="reset">${g.status === "finished" ? "Play again" : "Reset race"}</button>`;
+    const withMembers = PREVIEW ? [] : teams.filter(t => membersOf(t).length);
+    if (withMembers.length) h += `<span class="label" style="margin-top:16px">Captains</span>
+      <p class="muted" style="font-size:14px;margin:0 0 6px">If a captain drops out, hand their car to a teammate.</p>
+      ${withMembers.map(t => `<div style="margin-top:10px"><div class="pname">${esc(t.name)}</div>${rosterHTML(t, true)}</div>`).join("")}`;
+    patch(hp, h);
+  }
+
+  // Standings
+  const ranked = [...teams].sort((a, b) => (b.pos || 0) - (a.pos || 0) || byJoined(a, b));
+  patch($("#standings"), ranked.length ? ranked.map((t, i) => {
+    const mv = g.status === "racing" && canMove(g, t), n = membersOf(t).length;
+    return `<li><span class="place">${i + 1}</span>${carSVG(t.car, {label: CAR[t.car]?.name})}
+      <div style="min-width:0"><div class="pname">${esc(t.name)}${mine && mine.team.id === t.id ? '<span class="tag you">Yours</span>' : ""}${g.winner === t.id ? '<span class="tag">Winner</span>' : ""}</div>
+      <div class="muted" style="font-size:13px">${(t.pos || 0) === 0 ? "Start" : t.pos >= FINISH ? "Finish" : "Mile " + t.pos}, captain ${esc(t.captainName)}${n ? ` +${n}` : ""}</div>
+      <div class="bar"><span style="width:${((t.pos || 0) / FINISH * 100).toFixed(1)}%"></span></div></div>
+      <div class="ctrls">${mv ? `<button class="btn small" data-action="move" data-id="${t.id}" data-d="-1" aria-label="Move ${esc(t.name)} back 1 mile">−</button>
+        <button class="btn small" data-action="move" data-id="${t.id}" data-d="1" aria-label="Move ${esc(t.name)} forward 1 mile">+</button>` : ""}
+        ${host ? `<button class="btn small danger" data-action="removeTeam" data-id="${t.id}" aria-label="Remove ${esc(t.name)}">✕</button>` : ""}</div></li>`;
+  }).join("") : `<li style="display:block" class="muted">No teams on the grid yet.</li>`);
+
+  // Log
+  patch($("#log"), toArr(g.log).slice().reverse().slice(0, 10).map(e =>
+    `<li><time>${new Date(e.t).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"})}</time>${esc(e.text)}</li>`).join(""));
+
+  // Celebration
+  if (g.status === "finished" && g.winner && g.teams && g.teams[g.winner]) {
+    if (celebratedAt !== g.finishedAt) { celebratedAt = g.finishedAt; celebrate(g.teams[g.winner], mine && mine.team.id === g.winner); }
+  } else hideCelebration();
+}
+/* ---------- Celebration ---------- */
+let confettiRAF;
+function celebrate(t, isMine) {
+  $("#celeCar").innerHTML = carSVG(t.car);
+  $("#celeName").textContent = (isMine ? "That's your team, " : "") + t.name + "!";
+  $("#celeMsg").textContent = "Congratulations, you went the extra mile!!";
+  $("#celeBtns").innerHTML = (isHost(game) ? `<button class="btn primary" data-action="reset">Play again</button>` : "") +
+    `<button class="btn" data-action="closeCele">Close</button>`;
+  $("#celebrate").classList.add("show");
+  $("#celeBtns button:last-child").focus();
+  runConfetti();
+}
+function hideCelebration() { $("#celebrate").classList.remove("show"); cancelAnimationFrame(confettiRAF); }
+function runConfetti() {
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+  const cv = $("#confetti"), ctx = cv.getContext("2d"), dpr = window.devicePixelRatio || 1;
+  cv.width = innerWidth * dpr; cv.height = innerHeight * dpr; ctx.scale(dpr, dpr);
+  const colors = ["#F2C230", "#F6F6F1", "#E0303F", "#19C2B0", "#2F6BE0", "#F28C28"];
+  const bits = Array.from({length: 160}, () => ({x: Math.random() * innerWidth, y: -20 - Math.random() * innerHeight,
+    w: 6 + Math.random() * 6, h: 8 + Math.random() * 8, vy: 2 + Math.random() * 3, vx: -1 + Math.random() * 2,
+    r: Math.random() * 6, vr: -.15 + Math.random() * .3, c: colors[Math.random() * colors.length | 0]}));
+  const end = performance.now() + 7000;
+  cancelAnimationFrame(confettiRAF);
+  (function frame(t) {
+    ctx.clearRect(0, 0, innerWidth, innerHeight);
+    bits.forEach(b => {
+      b.x += b.vx; b.y += b.vy; b.r += b.vr;
+      if (b.y > innerHeight + 20 && t < end) { b.y = -20; b.x = Math.random() * innerWidth; }
+      ctx.save(); ctx.translate(b.x, b.y); ctx.rotate(b.r); ctx.fillStyle = b.c; ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h); ctx.restore();
+    });
+    if (t < end + 4000) confettiRAF = requestAnimationFrame(frame); else ctx.clearRect(0, 0, innerWidth, innerHeight);
+  })(performance.now());
+}
+
+/* ---------- Events ---------- */
+document.addEventListener("click", async e => {
+  const b = e.target.closest("[data-action]"); if (!b || b.disabled) return;
+  const a = b.dataset.action;
+  if (a === "create") return createGame();
+  if (a === "gotoCode") {
+    const c = ($("#joinCode").value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (c.length < 4) return toast("Enter the 5-character game code.");
+    history.pushState({}, "", "?game=" + c); return openGame(c);
+  }
+  if (a === "copy") {
+    const inp = $("#shareLink");
+    try { await navigator.clipboard.writeText(inp.value); toast("Link copied. Send it to every team member."); }
+    catch { inp.select(); toast("Select the link and copy it to share."); }
+    return;
+  }
+  if (a === "pickCar") {
+    draftCar = b.dataset.car;
+    b.parentElement.querySelectorAll(".car-opt").forEach(x => x.setAttribute("aria-pressed", x === b));
+    return;
+  }
+  const needName = () => { const n = clean(draftName); if (!n) { toast(PREVIEW ? "Enter the captain's name." : "Enter your name first."); $("#myname")?.focus(); } return n; };
+  if (a === "createTeam") {
+    const n = needName(); if (!n) return;
+    const tn = clean(draftTeam);
+    if (!tn) { toast("Enter a team name."); $("#tname")?.focus(); return; }
+    if (!draftCar) return toast("Pick a car for your team.");
+    if (await actions.createTeam(tn, n, draftCar)) { draftTeam = ""; draftCar = null; if (PREVIEW) draftName = ""; }
+    return;
+  }
+  if (a === "joinTeam") { const n = needName(); if (n) actions.joinTeam(b.dataset.id, n); return; }
+  if (a === "changeCar") return actions.changeCar(b.dataset.team, b.dataset.car);
+  if (a === "makeCaptain") {
+    const t = game?.teams?.[b.dataset.team], m = t?.members?.[b.dataset.id];
+    if (m && confirm(`Make ${m.name} captain of ${t.name}? Only the captain can move the car.`)) actions.makeCaptain(b.dataset.team, b.dataset.id);
+    return;
+  }
+  if (a === "leave") {
+    const mine = teamOf(game); if (!mine) return;
+    const next = membersOf({members: mine.t.members})[0];
+    const msg = mine.role === "member" ? `Leave ${mine.t.name}?`
+      : next ? `Leave ${mine.t.name}? ${next.name} will become captain.` : `Leave ${mine.t.name}? With no teammates, your team will be removed from the game.`;
+    if (confirm(msg)) actions.leave();
+    return;
+  }
+  if (a === "move") return actions.move(b.dataset.id, +b.dataset.d);
+  if (a === "removeTeam") {
+    const t = game?.teams?.[b.dataset.id];
+    if (t && confirm(`Remove ${t.name} from the game?`)) actions.removeTeam(b.dataset.id); return;
+  }
+  if (a === "start") return actions.start();
+  if (a === "reset") { if (game.status === "finished" || confirm("Send every car back to Start?")) { hideCelebration(); actions.reset(); } return; }
+  if (a === "closeCele") return hideCelebration();
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") hideCelebration(); });
+let rT; addEventListener("resize", () => { clearTimeout(rT); rT = setTimeout(drawRoad, 120); });
+document.fonts?.ready.then(drawRoad);
+addEventListener("popstate", route);
+
+function route() {
+  $("#previewNote").hidden = !PREVIEW;
+  const c = (new URLSearchParams(location.search).get("game") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (c && !PREVIEW) openGame(c); else showLanding();
+}
+route();
+</script>
+</body>
+</html>
